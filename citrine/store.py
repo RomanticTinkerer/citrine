@@ -28,15 +28,16 @@ class Store:
             self.db.execute(f"update games set {', '.join(c + '=?' for c in COLS)} where id=?", (*_vals(g), gid))
         self.db.commit()
 
-    def add(self, g: Game) -> bool:
-        """Insert a game. Returns False if it was already stored."""
+    def add_many(self, games) -> int:
+        """Insert games with a single commit. Returns how many were new."""
+        sql = f"insert or ignore into games(id, source, {', '.join(COLS)}) values ({', '.join('?' * (len(COLS) + 2))})"
         with self.lock:
-            cur = self.db.execute(
-                f"insert or ignore into games(id, source, {', '.join(COLS)}) values ({', '.join('?' * (len(COLS) + 2))})",
-                (g.id, g.source, *_vals(g)),
-            )
+            n = sum(self.db.execute(sql, (g.id, g.source, *_vals(g))).rowcount for g in games)
             self.db.commit()
-            return cur.rowcount == 1
+        return n
+
+    def add(self, g: Game) -> bool:
+        return self.add_many([g]) == 1
 
     def get(self, gid):
         with self.lock:

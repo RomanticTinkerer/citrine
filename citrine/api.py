@@ -29,7 +29,7 @@ def get_client() -> Client:
 
 
 def save(store, games, errors):
-    return {"games": games, "new": sum(store.add(g) for g in games), "errors": errors}
+    return {"games": games, "new": store.add_many(games), "errors": errors}
 
 
 def fetch(client, ref, max_games=50):

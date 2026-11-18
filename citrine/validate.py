@@ -37,18 +37,19 @@ def parse_pgn(text, source="pgn", source_url=None, source_id=None):
     while (g := chess.pgn.read_game(stream)) is not None:
         n += 1
         h = g.headers
+        label = h.get("Link") or f"game {n}"  # say which game was bad
         if h.get("Variant", "Standard").lower() not in ("standard", "chess"):
-            errors.append(f"game {n}: variant {h['Variant']} is not supported")
+            errors.append(f"{label}: variant {h['Variant']} is not supported")
             continue
         if g.errors:
-            errors.append(f"game {n}: {g.errors[0]}")
+            errors.append(f"{label}: {g.errors[0]}")
             continue
         if g.board().fen() != chess.STARTING_FEN:
-            errors.append(f"game {n}: custom start position is not supported")
+            errors.append(f"{label}: custom start position is not supported")
             continue
         nodes = list(g.mainline())
         if not nodes:
-            errors.append(f"game {n}: no moves")
+            errors.append(f"{label}: no moves")
             continue
         moves = [x.move.uci() for x in nodes]
         white, black = h.get("White", "?"), h.get("Black", "?")
