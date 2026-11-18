@@ -6,13 +6,13 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 
 from .http import Client
 from .models import Game, GamesIn
-from .sources import SourceError, lichess, resolve
+from .sources import SourceError, chesscom, lichess, resolve
 from .store import Store
 from .validate import parse_pgn
 
 app = FastAPI(title="citrine", description="Open API for chess game data.", version="0.1.0")
 
-SOURCES = {"lichess": lichess}
+SOURCES = {"lichess": lichess, "chesscom": chesscom}
 
 
 @lru_cache

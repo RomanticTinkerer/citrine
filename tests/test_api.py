@@ -40,7 +40,7 @@ def test_lichess_link(client, tmp_path):
     assert seen[0].startswith("https://lichess.org/game/export/abcd1234")
     assert client.post("/games", json={"url": "https://evil.test/x"}).status_code == 400
     assert client.post("/games", json={"url": "https://lichess.org/@/bob"}).status_code == 400
-    assert client.post("/games", json={"url": "https://www.chess.com/game/live/1"}).status_code == 501
+    assert client.post("/games", json={"url": "https://www.chess.com/game/live/1"}).status_code == 403  # off by default
 
 
 def test_needs_exactly_one_input(client):
