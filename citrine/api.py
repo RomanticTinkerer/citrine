@@ -3,10 +3,11 @@ from functools import lru_cache
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from .http import Client
-from .models import Game, GamesIn
-from .sources import SourceError, chesscom, lichess, resolve
+from .models import Game, GamesIn, ProfileIn
+from .sources import SourceError, chesscom, lichess, resolve, resolve_profile
 from .store import Store
 from .validate import parse_pgn
 
@@ -47,6 +48,16 @@ def fetch(client, ref, max_games=50):
         raise HTTPException(502, f"could not reach {ref.source}")
 
 
+def ingest(store, client, ref, max_games=50):
+    pgns, errors = fetch(client, ref, max_games)
+    games = []
+    for p in pgns:
+        gs, errs = parse_pgn(p, source=ref.source, source_id=ref.value if ref.kind == "game" else None)
+        games += gs
+        errors += errs
+    return save(store, games, errors)
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -62,13 +73,29 @@ def post_games(body: GamesIn, store: Store = Depends(get_store), client: Client 
         raise HTTPException(e.status, e.message)
     if ref.kind != "game":
         raise HTTPException(400, "that is a profile link, use POST /profiles")
-    pgns, errors = fetch(client, ref)
-    games = []
-    for p in pgns:
-        gs, errs = parse_pgn(p, source=ref.source, source_id=ref.value)
-        games += gs
-        errors += errs
-    return save(store, games, errors)
+    return ingest(store, client, ref)
+
+
+@app.post("/profiles")
+def post_profiles(body: ProfileIn, store: Store = Depends(get_store), client: Client = Depends(get_client)):
+    try:
+        ref = resolve(body.profile_url) if body.profile_url else resolve_profile(body.source, body.username)
+    except SourceError as e:
+        raise HTTPException(e.status, e.message)
+    if ref.kind != "profile":
+        raise HTTPException(400, "that is a game link, use POST /games")
+    r = ingest(store, client, ref, body.max_games)
+    return {"found": len(r["games"]), "new": r["new"], "errors": r["errors"]}
+
+
+@app.get("/export")
+def export(source: str | None = None, store: Store = Depends(get_store)):
+    return StreamingResponse(store.export(source), media_type="application/x-ndjson")
+
+
+@app.post("/judge/{game_id}", status_code=501)
+def judge(game_id: str):
+    return {"detail": "move judging is not built yet"}
 
 
 @app.get("/games/{game_id}", response_model=Game)

@@ -43,6 +43,25 @@ def test_lichess_link(client, tmp_path):
     assert client.post("/games", json={"url": "https://www.chess.com/game/live/1"}).status_code == 403  # off by default
 
 
+def test_profile_export_and_judge(client, tmp_path):
+    seen = []
+
+    def handler(req):
+        seen.append(dict(req.url.params))
+        return httpx.Response(200, text=PGN.split("\n\n[White")[0] + "\n")
+
+    app.dependency_overrides[get_client] = lambda: Client(tmp_path, gap=0, transport=httpx.MockTransport(handler))
+    r = client.post("/profiles", json={"source": "lichess", "username": "bob", "max_games": 5}).json()
+    assert r == {"found": 1, "new": 1, "errors": []} and seen[0]["max"] == "5"
+    assert client.post("/profiles", json={"profile_url": "https://lichess.org/@/bob", "max_games": 5}).json()["new"] == 0
+    assert client.post("/profiles", json={"profile_url": "https://lichess.org/abcd1234"}).status_code == 400
+    assert client.post("/profiles", json={"source": "lichess", "username": "bob", "max_games": 501}).status_code == 422
+    assert client.post("/profiles", json={"source": "lichess", "username": "../x"}).status_code == 400
+    lines = client.get("/export").text.splitlines()
+    assert len(lines) == 1 and client.get("/export", params={"source": "pgn"}).text == ""
+    assert client.post("/judge/anything").status_code == 501
+
+
 def test_needs_exactly_one_input(client):
     assert client.post("/games", json={}).status_code == 422
     assert client.post("/games", json={"pgn": "x", "url": "y"}).status_code == 422
