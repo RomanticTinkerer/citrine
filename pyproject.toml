@@ -1,0 +1,21 @@
+[project]
+name = "citrine"
+version = "0.1.0"
+description = "Open API that turns PGNs and game links into clean JSON game records."
+readme = "README.md"
+license = "AGPL-3.0-only"
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "chess>=1.10"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["citrine", "citrine.sources"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
