@@ -25,6 +25,11 @@ def test_post_and_read_back(client):
     assert client.get(f"/games/{gid}").json()["white"]["name"] == "Ann"
     assert len(client.get("/games", params={"player": "bob"}).json()) == 1
     assert client.get("/games/nope").status_code == 404
+    assert client.get(f"/games/{gid}").json()["moves_san"] == ["e4", "e5"]
+    pgn = client.get(f"/games/{gid}/pgn")
+    assert pgn.headers["content-type"].startswith("application/x-chess-pgn") and '[White "Ann"]' in pgn.text
+    assert "1. e4 e5" in client.get("/export", params={"format": "pgn"}).text
+    assert client.get(f"/games/nope/pgn").status_code == 404
 
 
 def test_lichess_link(client, tmp_path):

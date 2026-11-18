@@ -1,6 +1,6 @@
 # citrine
 
-An open API for chess game data. Give it PGN text or a game link, and it gives you back clean, validated JSON game records. Records are stored in SQLite and can be exported as JSONL for training.
+An open API for chess game data. Give it PGN text or a game link, and it gives you back clean, validated JSON game records. Records are stored in SQLite and can be exported as JSONL or PGN.
 
 It needs no API keys and no accounts. License: AGPL-3.0-only.
 
@@ -17,10 +17,13 @@ Interactive docs and the full schema are at `http://localhost:8000/docs`.
 
 - `POST /games` with `{"pgn": "..."}` or `{"url": "..."}`. A PGN can hold many games. Returns `{games, new, errors}`. Games that fail validation show up in `errors` and are not stored.
 - `POST /profiles` with `{"profile_url": "..."}` or `{"source": "lichess", "username": "..."}`, plus optional `max_games` (default 50, max 500). Returns `{found, new, errors}`.
-- `GET /games/{id}` and `GET /games?source=&player=&limit=&offset=`
-- `GET /export?source=` streams one game per line (`application/x-ndjson`).
+- `GET /games/{id}` and `GET /games?source=&player=&limit=&offset=`. Each game has `moves_uci` and `moves_san` (readable, like `Nf3`).
+- `GET /games/{id}/pgn` returns the game as PGN text, with clock comments when the source had clocks.
+- `GET /export?source=&format=jsonl|pgn` streams every game, either one JSON record per line or one PGN file with all games.
 - `POST /judge/{id}` returns 501 for now. Move evaluation comes later.
 - `GET /health`
+
+In the SQLite file, the `games` table has readable `white`, `black`, `result`, `date`, `moves` and `pgn` columns, plus `data` with the full JSON record. Older databases are upgraded automatically on startup.
 
 A game's `id` is a hash of the players, date and moves, so the same game from two places is stored once.
 

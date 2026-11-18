@@ -1,9 +1,10 @@
 import os
 from functools import lru_cache
+from typing import Literal
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from .http import Client
 from .models import Game, GamesIn, ProfileIn
@@ -13,6 +14,7 @@ from .validate import parse_pgn
 
 app = FastAPI(title="citrine", description="Open API for chess game data.", version="0.1.0")
 
+PGN_TYPE = "application/x-chess-pgn"
 SOURCES = {"lichess": lichess, "chesscom": chesscom}
 
 
@@ -89,8 +91,8 @@ def post_profiles(body: ProfileIn, store: Store = Depends(get_store), client: Cl
 
 
 @app.get("/export")
-def export(source: str | None = None, store: Store = Depends(get_store)):
-    return StreamingResponse(store.export(source), media_type="application/x-ndjson")
+def export(source: str | None = None, format: Literal["jsonl", "pgn"] = "jsonl", store: Store = Depends(get_store)):
+    return StreamingResponse(store.export(source, format), media_type=PGN_TYPE if format == "pgn" else "application/x-ndjson")
 
 
 @app.post("/judge/{game_id}", status_code=501)
@@ -104,6 +106,11 @@ def get_game(game_id: str, store: Store = Depends(get_store)):
     if not g:
         raise HTTPException(404, "game not found")
     return g
+
+
+@app.get("/games/{game_id}/pgn", response_class=PlainTextResponse)
+def get_pgn(game_id: str, store: Store = Depends(get_store)):
+    return PlainTextResponse(get_game(game_id, store).pgn + "\n", media_type=PGN_TYPE)
 
 
 @app.get("/games", response_model=list[Game])
