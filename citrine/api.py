@@ -1,19 +1,50 @@
 import os
 from functools import lru_cache
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import StreamingResponse
 
+from .http import Client
 from .models import Game, GamesIn
+from .sources import SourceError, lichess, resolve
 from .store import Store
 from .validate import parse_pgn
 
 app = FastAPI(title="citrine", description="Open API for chess game data.", version="0.1.0")
 
+SOURCES = {"lichess": lichess}
+
 
 @lru_cache
 def get_store() -> Store:
     return Store(os.environ.get("CITRINE_DB", "citrine.db"))
+
+
+@lru_cache
+def get_client() -> Client:
+    return Client()
+
+
+def save(store, games, errors):
+    return {"games": games, "new": sum(store.add(g) for g in games), "errors": errors}
+
+
+def fetch(client, ref, max_games=50):
+    """Run a source and return (pgns, errors), turning upstream failures into HTTP errors."""
+    mod = SOURCES.get(ref.source)
+    if not mod:
+        raise HTTPException(501, f"{ref.source} source is not available")
+    try:
+        if ref.kind == "game":
+            return mod.fetch_game(client, ref.value)
+        return mod.fetch_profile(client, ref.value, max_games)
+    except SourceError as e:
+        raise HTTPException(e.status, e.message)
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        raise HTTPException(404 if code == 404 else 502, f"{ref.source} answered {code}")
+    except httpx.HTTPError:
+        raise HTTPException(502, f"could not reach {ref.source}")
 
 
 @app.get("/health")
@@ -22,12 +53,22 @@ def health():
 
 
 @app.post("/games")
-def post_games(body: GamesIn, store: Store = Depends(get_store)):
-    if body.url:
-        raise HTTPException(501, "url sources are not enabled yet")
-    games, errors = parse_pgn(body.pgn)
-    new = sum(store.add(g) for g in games)
-    return {"games": games, "new": new, "errors": errors}
+def post_games(body: GamesIn, store: Store = Depends(get_store), client: Client = Depends(get_client)):
+    if body.pgn:
+        return save(store, *parse_pgn(body.pgn))
+    try:
+        ref = resolve(body.url)
+    except SourceError as e:
+        raise HTTPException(e.status, e.message)
+    if ref.kind != "game":
+        raise HTTPException(400, "that is a profile link, use POST /profiles")
+    pgns, errors = fetch(client, ref)
+    games = []
+    for p in pgns:
+        gs, errs = parse_pgn(p, source=ref.source, source_id=ref.value)
+        games += gs
+        errors += errs
+    return save(store, games, errors)
 
 
 @app.get("/games/{game_id}", response_model=Game)
