@@ -39,7 +39,7 @@ def test_lichess_link(client, tmp_path):
         seen.append(str(req.url))
         return httpx.Response(200, text=PGN.split("\n\n[White")[0] + "\n")
 
-    app.dependency_overrides[get_client] = lambda: Client(tmp_path, gap=0, transport=httpx.MockTransport(handler))
+    app.dependency_overrides[get_client] = lambda: Client(tmp_path, transport=httpx.MockTransport(handler))
     r = client.post("/games", json={"url": "https://lichess.org/abcd1234"}).json()
     assert r["new"] == 1 and r["games"][0]["source"] == "lichess" and r["games"][0]["source_id"] == "abcd1234"
     assert seen[0].startswith("https://lichess.org/game/export/abcd1234")
@@ -55,7 +55,7 @@ def test_profile_export_and_judge(client, tmp_path):
         seen.append(dict(req.url.params))
         return httpx.Response(200, text=PGN.split("\n\n[White")[0] + "\n")
 
-    app.dependency_overrides[get_client] = lambda: Client(tmp_path, gap=0, transport=httpx.MockTransport(handler))
+    app.dependency_overrides[get_client] = lambda: Client(tmp_path, transport=httpx.MockTransport(handler))
     r = client.post("/profiles", json={"source": "lichess", "username": "bob", "max_games": 5}).json()
     assert r == {"found": 1, "new": 1, "errors": []} and seen[0]["max"] == "5"
     assert client.post("/profiles", json={"profile_url": "https://lichess.org/@/bob", "max_games": 5}).json()["new"] == 0

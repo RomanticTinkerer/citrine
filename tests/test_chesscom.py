@@ -13,7 +13,7 @@ FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "chesscom_live.json")
 
 
 def client(tmp_path, handler):
-    return Client(tmp_path, gap=0, transport=httpx.MockTransport(handler))
+    return Client(tmp_path, transport=httpx.MockTransport(handler))
 
 
 def test_decoder_reaches_the_known_final_position():
@@ -54,6 +54,32 @@ def test_profile_pages_and_filters(tmp_path, monkeypatch):
     pgns, errors = chesscom.fetch_profile(client(tmp_path, handler), "someone", 10)
     assert len(pgns) == 1 and not errors
     assert seen == ["/callback/games/archive", "/callback/live/game/1"]
+
+
+def test_one_bad_game_does_not_lose_the_rest(tmp_path, monkeypatch):
+    monkeypatch.setenv("CITRINE_ENABLE_CHESSCOM", "1")
+
+    def handler(req):
+        if req.url.path == "/callback/games/archive":
+            rows = [{"id": i, "live": True, "gameType": {"code": "chess"}} for i in (1, 2, 3)]
+            return httpx.Response(200, json={"data": rows, "meta": {"totalPages": 1}})
+        gid = req.url.path.rsplit("/", 1)[1]
+        return {"1": httpx.Response(200, json=FIXTURE), "2": httpx.Response(404)}.get(gid, httpx.Response(200, json=FIXTURE))
+
+    pgns, errors = chesscom.fetch_profile(client(tmp_path, handler), "someone", 10)
+    assert len(pgns) == 2 and errors == ["live/2: chess.com answered 404"]  # 404 is just a missing game
+
+    def flaky(req):
+        if req.url.path.endswith("/2"):
+            return httpx.Response(503)
+        return handler(req)
+
+    chesscom.WORKERS = 1  # keep the order fixed for this check
+    try:
+        pgns, errors = chesscom.fetch_profile(client(tmp_path / "b", flaky), "someone", 10)
+    finally:
+        chesscom.WORKERS = 4
+    assert len(pgns) == 1 and "live/2: chess.com answered 503" in errors and errors[-1].startswith("stopped early")
 
 
 def test_blocked_page_is_a_clean_error(tmp_path, monkeypatch):

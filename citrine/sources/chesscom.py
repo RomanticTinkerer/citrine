@@ -3,13 +3,17 @@ break without warning) and is off unless CITRINE_ENABLE_CHESSCOM=1. Live games o
 
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import chess
 import chess.pgn
+import httpx
 
 from . import SourceError
 
 BASE = "https://www.chess.com"
+WORKERS = 4
 MONTH = 30 * 86400
 # chess.com packs each move into 2 characters: from-square index, then to-square index.
 # Promotions use to-index above 63. Verified against chess.com's own PGN for a real game.
@@ -86,11 +90,28 @@ def fetch_profile(client, username, max_games):
         if not rows or page >= pages:
             break
         page += 1
-    pgns, errors = [], []
-    # ponytail: one request per game, so 500 games takes minutes inside a single HTTP request.
-    # Move to a background job if that gets annoying.
-    for gid in ids[:max_games]:
-        p, e = fetch_game(client, f"live/{gid}")
-        pgns += p
-        errors += e
+    blocked = threading.Event()
+
+    def one(gid):
+        if blocked.is_set():
+            return [], []
+        try:
+            return fetch_game(client, f"live/{gid}")
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            if code != 404:  # a missing game is just missing, anything else means stop hammering
+                blocked.set()
+            return [], [f"live/{gid}: chess.com answered {code}"]
+        except (SourceError, httpx.HTTPError) as e:
+            blocked.set()
+            return [], [f"live/{gid}: {getattr(e, 'message', e)}"]
+
+    # ponytail: fixed 4 parallel fetches, one HTTP request per game. Games already fetched are
+    # kept even if a later one fails. Move to a background job if one request takes too long.
+    with ThreadPoolExecutor(WORKERS) as pool:
+        results = list(pool.map(one, ids[:max_games]))
+    pgns = [p for r in results for p in r[0]]
+    errors = [e for r in results for e in r[1]]
+    if blocked.is_set():
+        errors.append("stopped early: chess.com stopped answering, try again later")
     return pgns, errors
