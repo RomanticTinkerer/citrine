@@ -21,6 +21,7 @@ class Game(BaseModel):
     eco: str | None = None
     opening: str | None = None
     moves_uci: list[str]
+    moves_san: list[str] = []  # same moves as readable notation, e.g. Nf3
     clocks: list[float | None]  # seconds left after each move, null when unknown
     pgn: str
     fetched_at: str

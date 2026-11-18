@@ -2,22 +2,38 @@ import sqlite3
 import threading
 
 from .models import Game
+from .validate import numbered, san_list
+
+# Readable columns first so the table makes sense in any SQLite viewer. `data` is the full JSON record.
+COLS = ("white", "black", "result", "date", "moves", "pgn", "data")
+
+
+def _vals(g: Game):
+    return (g.white.name, g.black.name, g.result, g.date, numbered(g.moves_san), g.pgn, g.model_dump_json())
 
 
 class Store:
     def __init__(self, path):
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.lock = threading.Lock()  # ponytail: one connection plus a lock, fine until heavy concurrent writes
-        self.db.execute(
-            "create table if not exists games(id text primary key, source text, white text, black text, data text)"
-        )
+        self.db.execute("create table if not exists games(id text primary key, source text)")
+        have = {r[1] for r in self.db.execute("pragma table_info(games)")}
+        for c in COLS:
+            if c not in have:
+                self.db.execute(f"alter table games add column {c} text")
+        # older databases only had id, source, lowercased names and data: fill in the new columns
+        for gid, data in self.db.execute("select id, data from games where pgn is null").fetchall():
+            g = Game.model_validate_json(data)
+            g.moves_san = g.moves_san or san_list(g.moves_uci)
+            self.db.execute(f"update games set {', '.join(c + '=?' for c in COLS)} where id=?", (*_vals(g), gid))
+        self.db.commit()
 
     def add(self, g: Game) -> bool:
         """Insert a game. Returns False if it was already stored."""
         with self.lock:
             cur = self.db.execute(
-                "insert or ignore into games values (?,?,?,?,?)",
-                (g.id, g.source, g.white.name.lower(), g.black.name.lower(), g.model_dump_json()),
+                f"insert or ignore into games(id, source, {', '.join(COLS)}) values ({', '.join('?' * (len(COLS) + 2))})",
+                (g.id, g.source, *_vals(g)),
             )
             self.db.commit()
             return cur.rowcount == 1
@@ -33,7 +49,7 @@ class Store:
             sql += " and source=?"
             args.append(source)
         if player:
-            sql += " and (white=? or black=?)"
+            sql += " and (lower(white)=? or lower(black)=?)"
             args += [player.lower()] * 2
         return sql, args
 
@@ -45,17 +61,18 @@ class Store:
             ).fetchall()
         return [Game.model_validate_json(r[0]) for r in rows]
 
-    def export(self, source=None):
-        """Yield one JSON line per game."""
+    def export(self, source=None, fmt="jsonl"):
+        """Yield games as JSON lines, or as PGN text separated by blank lines."""
+        col, end = ("pgn", "\n\n") if fmt == "pgn" else ("data", "\n")
         sql, args = self._where(source, None)
         last = 0
         while True:  # batches by rowid, so big exports don't sit in memory or hold the lock
             with self.lock:
                 rows = self.db.execute(
-                    f"select rowid, data from games{sql} and rowid>? order by rowid limit 500", [*args, last]
+                    f"select rowid, {col} from games{sql} and rowid>? order by rowid limit 500", [*args, last]
                 ).fetchall()
             if not rows:
                 return
-            for _, data in rows:
-                yield data + "\n"
+            for _, text in rows:
+                yield text + end
             last = rows[-1][0]

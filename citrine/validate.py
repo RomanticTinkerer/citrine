@@ -15,6 +15,20 @@ def _elo(v):
         return None
 
 
+def san_list(uci_moves):
+    board, out = chess.Board(), []
+    for u in uci_moves:
+        m = chess.Move.from_uci(u)
+        out.append(board.san(m))
+        board.push(m)
+    return out
+
+
+def numbered(san):
+    """['e4', 'e5', 'Nf3'] -> '1. e4 e5 2. Nf3'"""
+    return " ".join(f"{i // 2 + 1}. {m}" if i % 2 == 0 else m for i, m in enumerate(san))
+
+
 def parse_pgn(text, source="pgn", source_url=None, source_id=None):
     """Parse PGN text into Games. Returns (games, errors); bad games are reported, not raised."""
     games, errors = [], []
@@ -60,6 +74,7 @@ def parse_pgn(text, source="pgn", source_url=None, source_id=None):
                 eco=h.get("ECO"),
                 opening=h.get("Opening"),
                 moves_uci=moves,
+                moves_san=[x.san() for x in nodes],
                 clocks=[x.clock() for x in nodes],
                 pgn=str(g),
                 fetched_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
