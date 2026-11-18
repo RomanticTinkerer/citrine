@@ -62,10 +62,10 @@ class Store:
             ).fetchall()
         return [Game.model_validate_json(r[0]) for r in rows]
 
-    def export(self, source=None, fmt="jsonl"):
+    def export(self, source=None, fmt="jsonl", player=None):
         """Yield games as JSON lines, or as PGN text separated by blank lines."""
         col, end = ("pgn", "\n\n") if fmt == "pgn" else ("data", "\n")
-        sql, args = self._where(source, None)
+        sql, args = self._where(source, player)
         last = 0
         while True:  # batches by rowid, so big exports don't sit in memory or hold the lock
             with self.lock:

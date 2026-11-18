@@ -13,6 +13,16 @@ uv run uvicorn citrine.api:app
 
 Interactive docs and the full schema are at `http://localhost:8000/docs`.
 
+## Command line
+
+```
+uv run citrine
+```
+
+It asks for a Lichess and a Chess.com username (press Enter to skip one), fetches all their games, and saves them in a `CitrineData` folder: `citrine.db`, plus a `.pgn` and a `.jsonl` file per account, like `lichess_name.pgn`. Typing a Chess.com username counts as turning that source on (see the warning below).
+
+Options: `--lichess USER` and `--chesscom USER` skip the questions, `--out FOLDER` changes the folder, `--max N` stops after N games per account.
+
 ## Endpoints
 
 - `POST /games` with `{"pgn": "..."}` or `{"url": "..."}`. A PGN can hold many games. Returns `{games, new, errors}`. Games that fail validation show up in `errors` and are not stored.
