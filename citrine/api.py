@@ -13,7 +13,7 @@ from .sources import SourceError, chesscom, lichess, resolve, resolve_profile
 from .store import Store
 from .validate import parse_pgn
 
-app = FastAPI(title="citrine", description="Open API for chess game data.", version="0.1.0")
+app = FastAPI(title="citrine", description="Open API for chess game data.", version="0.2.0")
 
 PGN_TYPE = "application/x-chess-pgn"
 SOURCES = {"lichess": lichess, "chesscom": chesscom}

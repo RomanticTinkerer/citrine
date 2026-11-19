@@ -18,6 +18,18 @@ curl -fsSL https://raw.githubusercontent.com/RomanticTinkerer/citrine/main/insta
 
 Your downloaded games are not touched. The window needs GTK4 and libadwaita from your distro (the installer prints the command if they are missing). The command line and terminal form work without them.
 
+## Prebuilt binary (x86_64 Linux)
+
+Each [release](https://github.com/RomanticTinkerer/citrine/releases/latest) has a single `citrine-linux-x86_64` file. No Python needed:
+
+```
+curl -fLO https://github.com/RomanticTinkerer/citrine/releases/latest/download/citrine-linux-x86_64
+chmod +x citrine-linux-x86_64
+./citrine-linux-x86_64 lichess:bob --from 2023
+```
+
+It does the command line, `--tui` and `--serve`. It does not include the GTK window, which needs your system's GTK4 libraries (use the installer for that). Check the download against `SHA256SUMS` from the same release. Rebuild it yourself with `uv run --with pyinstaller pyinstaller --onefile --name citrine-linux-x86_64 --collect-submodules uvicorn --hidden-import citrine.api --exclude-module gi launcher.py`.
+
 ## Download games
 
 Three ways, same result: a folder with a `.pgn` and a `.jsonl` file per account (like `lichess_name.pgn`), plus `citrine.db`.
