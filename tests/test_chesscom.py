@@ -96,3 +96,40 @@ def test_blocked_page_is_a_clean_error(tmp_path, monkeypatch):
     with pytest.raises(SourceError) as e:
         chesscom.fetch_game(client(tmp_path, lambda r: httpx.Response(200, text="<html>")), "live/9")
     assert e.value.status == 502
+
+
+def dated_handler(months):
+    """Archive of one game per month, newest first: id 1 is the last month, id N the first."""
+    def handler(req):
+        if req.url.path == "/callback/games/archive":
+            rows = [{"id": i, "live": True, "gameType": {"code": "chess"}} for i in range(1, months + 1)]
+            return httpx.Response(200, json={"data": rows, "meta": {"totalPages": 1}})
+        gid = int(req.url.path.rsplit("/", 1)[1])
+        data = json.loads(json.dumps(FIXTURE))
+        n = months - gid  # 0 is the oldest game
+        data["game"]["pgnHeaders"]["Date"] = f"{2000 + n // 12}.{n % 12 + 1:02d}.15"
+        return httpx.Response(200, json=data)
+
+    return handler
+
+
+def test_date_range_keeps_only_those_months(tmp_path, monkeypatch):
+    monkeypatch.setenv("CITRINE_ENABLE_CHESSCOM", "1")
+    import datetime as dt
+
+    for margin in (0, 50):
+        monkeypatch.setattr(chesscom, "MARGIN", margin)
+        pgns, errors = chesscom.fetch_profile(client(tmp_path / str(margin), dated_handler(12)), "x", 999, dt.date(2000, 5, 1), dt.date(2000, 7, 31))
+        assert not errors and sorted(p.split('[Date "')[1][:10] for p in pgns) == ["2000.05.15", "2000.06.15", "2000.07.15"]
+
+
+def test_range_search_does_not_fetch_every_game(tmp_path, monkeypatch):
+    monkeypatch.setenv("CITRINE_ENABLE_CHESSCOM", "1")
+    monkeypatch.setattr(chesscom, "MARGIN", 0)
+    import datetime as dt
+
+    seen = []
+    inner = dated_handler(200)
+    handler = lambda req: (seen.append(req.url.path), inner(req))[1]
+    pgns, _ = chesscom.fetch_profile(client(tmp_path, handler), "x", 999, dt.date(2010, 1, 1), dt.date(2010, 12, 31))
+    assert len(pgns) == 12 and len(set(seen)) < 60  # 200 games listed, only the ones near the edges and in range are read

@@ -70,3 +70,8 @@ def test_profile_export_and_judge(client, tmp_path):
 def test_needs_exactly_one_input(client):
     assert client.post("/games", json={}).status_code == 422
     assert client.post("/games", json={"pgn": "x", "url": "y"}).status_code == 422
+
+
+def test_bad_range_is_a_400():
+    r = TestClient(app).post("/profiles", json={"source": "lichess", "username": "bob", "since": "2021", "until": "2020"})
+    assert r.status_code == 400 and "after the end" in r.json()["detail"]

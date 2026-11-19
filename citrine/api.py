@@ -6,6 +6,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from . import period
 from .http import Client
 from .models import Game, GamesIn, ProfileIn
 from .sources import SourceError, chesscom, lichess, resolve, resolve_profile
@@ -32,7 +33,7 @@ def save(store, games, errors):
     return {"games": games, "new": store.add_many(games), "errors": errors}
 
 
-def fetch(client, ref, max_games=50):
+def fetch(client, ref, max_games=50, since=None, until=None, progress=None):
     """Run a source and return (pgns, errors), turning upstream failures into HTTP errors."""
     mod = SOURCES.get(ref.source)
     if not mod:
@@ -40,7 +41,7 @@ def fetch(client, ref, max_games=50):
     try:
         if ref.kind == "game":
             return mod.fetch_game(client, ref.value)
-        return mod.fetch_profile(client, ref.value, max_games)
+        return mod.fetch_profile(client, ref.value, max_games, since, until, progress)
     except SourceError as e:
         raise HTTPException(e.status, e.message)
     except httpx.HTTPStatusError as e:
@@ -50,8 +51,8 @@ def fetch(client, ref, max_games=50):
         raise HTTPException(502, f"could not reach {ref.source}")
 
 
-def ingest(store, client, ref, max_games=50):
-    pgns, errors = fetch(client, ref, max_games)
+def ingest(store, client, ref, max_games=50, since=None, until=None, progress=None):
+    pgns, errors = fetch(client, ref, max_games, since, until, progress)
     games = []
     for p in pgns:
         gs, errs = parse_pgn(p, source=ref.source, source_id=ref.value if ref.kind == "game" else None)
@@ -86,7 +87,11 @@ def post_profiles(body: ProfileIn, store: Store = Depends(get_store), client: Cl
         raise HTTPException(e.status, e.message)
     if ref.kind != "profile":
         raise HTTPException(400, "that is a game link, use POST /games")
-    r = ingest(store, client, ref, body.max_games)
+    try:
+        since, until = period.parse_range(body.since, body.until)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    r = ingest(store, client, ref, body.max_games, since, until)
     return {"found": len(r["games"]), "new": r["new"], "errors": r["errors"]}
 
 

@@ -44,6 +44,8 @@ class ProfileIn(BaseModel):
     source: str | None = None
     username: str | None = None
     max_games: int = Field(50, ge=1, le=500)
+    since: str | None = Field(None, description="first day to include: 2020, 2020-05 or 2020-05-17")
+    until: str | None = Field(None, description="last day to include, same formats")
 
     @model_validator(mode="after")
     def _one_of(self):

@@ -1,8 +1,10 @@
 """Chess.com source. It reads the JSON that chess.com's own website uses (undocumented, so it can
 break without warning) and is off unless CITRINE_ENABLE_CHESSCOM=1. Reads live and daily (correspondence) games."""
 
+import datetime as dt
 import json
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,6 +17,7 @@ from . import SourceError
 BASE = "https://www.chess.com"
 WORKERS = 4
 MONTH = 30 * 86400
+MARGIN = 50  # extra games kept around a date range edge, see _in_range
 # chess.com packs each move into 2 characters: from-square index, then to-square index.
 # Promotions use to-index above 63. Verified against chess.com's own PGN for a real game.
 TCN = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?{~}(^)[_]@#$,./&-*++="
@@ -75,10 +78,45 @@ def fetch_game(client, value):
         return [], [f"{kind}/{game_id}: {e}"]
 
 
-def fetch_profile(client, username, max_games):
+def _date(client, gid):
+    """Start date of a game from its (cached) PGN, or None if it has none."""
+    pgns, _ = fetch_game(client, gid)
+    m = pgns and re.search(r'\[Date "(\d{4})\.(\d\d)\.(\d\d)"\]', pgns[0])
+    return dt.date(*map(int, m.groups())) if m else None
+
+
+def _first(n, ok):
+    """First index in 0..n where ok(i) is true, given ok flips from false to true once."""
+    lo, hi = 0, n
+    while lo < hi:
+        mid = (lo + hi) // 2
+        lo, hi = (lo, mid) if ok(mid) else (mid + 1, hi)
+    return lo
+
+
+def _in_range(client, ids, since, until):
+    """The slice of newest-first `ids` that falls in the range. The list has no dates, so we binary
+    search it by reading a few games (about 2*log2(n) requests, cached for the real fetch later).
+    ponytail: the list is ordered by finish time and we compare start dates, so we keep a margin of
+    MARGIN extra games on each side and filter them exactly afterwards."""
+    got = {}
+    date = lambda i: got.setdefault(i, _date(client, ids[i]))
+    start = _first(len(ids), lambda i: until is None or (date(i) or dt.date.min) <= until)
+    stop = _first(len(ids), lambda i: since is not None and (date(i) or dt.date.max) < since)
+    return ids[max(0, start - MARGIN) : stop + MARGIN]
+
+
+def _keep(pgn, since, until):
+    m = re.search(r'\[Date "(\d{4})\.(\d\d)\.(\d\d)"\]', pgn)
+    d = dt.date(*map(int, m.groups())) if m else None
+    return d is None or ((since is None or d >= since) and (until is None or d <= until))
+
+
+def fetch_profile(client, username, max_games, since=None, until=None, progress=None):
     _enabled()
+    ranged = since or until
     ids, page = [], 1
-    while len(ids) < max_games:
+    while ranged or len(ids) < max_games:
         try:
             d = json.loads(client.get(f"{BASE}/callback/games/archive", params={"username": username, "page": page}, ttl=300))
             rows, pages = d["data"], d["meta"]["totalPages"]
@@ -104,11 +142,23 @@ def fetch_profile(client, username, max_games):
             blocked.set()
             return [], [f"{gid}: {getattr(e, 'message', e)}"]
 
+    if ranged:
+        ids = _in_range(client, ids, since, until)
+    ids = ids if ranged else ids[:max_games]
+    done = []
+
+    def counted(gid):
+        r = one(gid)
+        done.append(1)
+        if progress:
+            progress(len(done), len(ids))
+        return r
+
     # ponytail: fixed 4 parallel fetches, one HTTP request per game. Games already fetched are
     # kept even if a later one fails. Move to a background job if one request takes too long.
     with ThreadPoolExecutor(WORKERS) as pool:
-        results = list(pool.map(one, ids[:max_games]))
-    pgns = [p for r in results for p in r[0]]
+        results = list(pool.map(counted, ids))
+    pgns = [p for r in results for p in r[0] if _keep(p, since, until)][:max_games]
     errors = [e for r in results for e in r[1]]
     if blocked.is_set():
         errors.append("stopped early: chess.com stopped answering, try again later")
