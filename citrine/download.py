@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from . import period
 from .api import ingest
 from .http import Client
 from .sources import Ref, SourceError, resolve, resolve_profile
@@ -45,3 +46,27 @@ def run(ref: Ref, out, since=None, until=None, max_games=ALL, progress=None):
         result["files"].append(f)
     result.update(games=len(r["games"]), new=r["new"], errors=r["errors"])
     return result
+
+
+def submit(values, progress=None):
+    """Validate the form and download. Returns the lines to show; never raises."""
+    target, folder, since, until, mx = (v.strip() for v in values)
+    try:
+        refs = [parse_target(t) for t in re.split(r"[\s,]+", target) if t]
+        a, b = period.parse_range(since or None, until or None)
+    except (ValueError, SourceError) as e:
+        return [f"Check the form: {getattr(e, 'message', e)}"]
+    if mx and not mx.isdigit():
+        return ["Max games must be a number."]
+    limit = int(mx) if mx else ALL
+    if not refs:
+        return ["Paste a link or type lichess:name or chesscom:name first."]
+    lines = []
+    for ref in refs:
+        r = run(ref, folder or "CitrineData", a, b, limit, progress)
+        if r["failed"]:
+            lines.append(f"{r['label']}: failed: {r['failed']}")
+        else:
+            lines.append(f"{r['label']}: {r['games']} games ({r['new']} new) -> {r['files'][0]}")
+            lines += [f"  skipped: {e}" for e in r["errors"][:3]]
+    return lines

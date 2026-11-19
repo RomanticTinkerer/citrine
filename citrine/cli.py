@@ -20,12 +20,17 @@ def main(argv=None):
     ap.add_argument("--from", dest="since", metavar="DATE", help="first day: 2020, 2020-05 or 2020-05-17")
     ap.add_argument("--to", dest="until", metavar="DATE", help="last day, same formats (a bare year means its last day)")
     ap.add_argument("--max", type=int, default=ALL, help="stop after this many games per account (newest first)")
+    ap.add_argument("--tui", action="store_true", help="open the terminal form instead")
     ap.add_argument("--serve", action="store_true", help="run the web API on http://127.0.0.1:8000")
     a = ap.parse_args(argv)
     if a.serve:
         import uvicorn
 
         return uvicorn.run("citrine.api:app", host="127.0.0.1", port=8000)
+    if a.tui:
+        from .tui import main as tui
+
+        return tui(a.out)
     try:
         since, until = period.parse_range(a.since, a.until)
         refs = [parse_target(t) for t in a.targets]
