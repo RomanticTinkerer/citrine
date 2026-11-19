@@ -26,7 +26,9 @@ def main(argv=None):
     if a.serve:
         import uvicorn
 
-        return uvicorn.run("citrine.api:app", host="127.0.0.1", port=8000)
+        from .api import app  # the object, not a "module:name" string, so a frozen binary can find it
+
+        return uvicorn.run(app, host="127.0.0.1", port=8000)
     if a.tui:
         from .tui import main as tui
 
