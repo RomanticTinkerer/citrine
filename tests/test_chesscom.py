@@ -52,8 +52,17 @@ def test_profile_pages_and_filters(tmp_path, monkeypatch):
         return httpx.Response(200, json=FIXTURE)
 
     pgns, errors = chesscom.fetch_profile(client(tmp_path, handler), "someone", 10)
-    assert len(pgns) == 1 and not errors
-    assert seen == ["/callback/games/archive", "/callback/live/game/1"]
+    assert len(pgns) == 2 and not errors  # chess960 is dropped, the daily game is kept
+    assert seen[0] == "/callback/games/archive" and set(seen[1:]) == {"/callback/live/game/1", "/callback/daily/game/3"}
+
+
+def test_daily_game_to_valid_record(tmp_path, monkeypatch):
+    monkeypatch.setenv("CITRINE_ENABLE_CHESSCOM", "1")
+    daily = json.loads((Path(__file__).parent / "fixtures" / "chesscom_daily.json").read_text())
+    pgns, errors = chesscom.fetch_game(client(tmp_path, lambda r: httpx.Response(200, json=daily)), "daily/1062698880")
+    g = parse_pgn(pgns[0], source="chesscom", source_id="daily/1062698880")[0][0]
+    assert not errors and g.source_url == "https://www.chess.com/game/daily/1062698880"
+    assert g.white.name == "erik" and g.time_control == "1/259200" and len(g.moves_uci) == 43 and not any(g.clocks)
 
 
 def test_one_bad_game_does_not_lose_the_rest(tmp_path, monkeypatch):

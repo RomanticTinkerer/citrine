@@ -1,5 +1,5 @@
 """Chess.com source. It reads the JSON that chess.com's own website uses (undocumented, so it can
-break without warning) and is off unless CITRINE_ENABLE_CHESSCOM=1. Live games only for now."""
+break without warning) and is off unless CITRINE_ENABLE_CHESSCOM=1. Reads live and daily (correspondence) games."""
 
 import json
 import os
@@ -38,7 +38,7 @@ def decode_moves(s):
     return out
 
 
-def to_pgn(data, game_id):
+def to_pgn(data, game_id, kind="live"):
     """Turn chess.com's game JSON into PGN text. Raises ValueError for games we can't use."""
     try:
         g = data["game"]
@@ -47,7 +47,7 @@ def to_pgn(data, game_id):
             raise ValueError("variants and custom start positions are not supported")
         game = chess.pgn.Game()
         game.headers.update({k: v for k, v in h.items() if k not in ("FEN", "SetUp")})
-        game.headers["Link"] = f"{BASE}/game/live/{game_id}"
+        game.headers["Link"] = f"{BASE}/game/{kind}/{game_id}"
         stamps = (g.get("moveTimestamps") or "").strip(",").split(",")
         board, node = chess.Board(), game
         for i, uci in enumerate(decode_moves(g["moveList"])):
@@ -65,16 +65,14 @@ def to_pgn(data, game_id):
 
 def fetch_game(client, value):
     _enabled()
-    kind, game_id = value.split("/")
-    if kind != "live":
-        raise SourceError(501, "chess.com daily games are not supported yet")
+    kind, game_id = value.split("/")  # live or daily, both have the same JSON shape
     try:
-        data = json.loads(client.get(f"{BASE}/callback/live/game/{game_id}", ttl=MONTH))
-        return [to_pgn(data, game_id)], []
+        data = json.loads(client.get(f"{BASE}/callback/{kind}/game/{game_id}", ttl=MONTH))
+        return [to_pgn(data, game_id, kind)], []
     except json.JSONDecodeError:
         raise SourceError(502, "chess.com did not return game data (blocked or changed?)")
     except ValueError as e:
-        return [], [f"live/{game_id}: {e}"]
+        return [], [f"{kind}/{game_id}: {e}"]
 
 
 def fetch_profile(client, username, max_games):
@@ -82,11 +80,11 @@ def fetch_profile(client, username, max_games):
     ids, page = [], 1
     while len(ids) < max_games:
         try:
-            d = json.loads(client.get(f"{BASE}/callback/games/archive", params={"username": username, "gameType": "live", "page": page}, ttl=300))
+            d = json.loads(client.get(f"{BASE}/callback/games/archive", params={"username": username, "page": page}, ttl=300))
             rows, pages = d["data"], d["meta"]["totalPages"]
         except (json.JSONDecodeError, KeyError, TypeError):
             raise SourceError(502, "chess.com did not return a game list (blocked or changed?)")
-        ids += [r["id"] for r in rows if r.get("live") and r.get("gameType", {}).get("code") == "chess" and not r.get("vsComputer")]
+        ids += [f"{'live' if r.get('live') else 'daily'}/{r['id']}" for r in rows if r.get("gameType", {}).get("code") == "chess" and not r.get("vsComputer")]
         if not rows or page >= pages:
             break
         page += 1
@@ -96,15 +94,15 @@ def fetch_profile(client, username, max_games):
         if blocked.is_set():
             return [], []
         try:
-            return fetch_game(client, f"live/{gid}")
+            return fetch_game(client, gid)
         except httpx.HTTPStatusError as e:
             code = e.response.status_code
             if code != 404:  # a missing game is just missing, anything else means stop hammering
                 blocked.set()
-            return [], [f"live/{gid}: chess.com answered {code}"]
+            return [], [f"{gid}: chess.com answered {code}"]
         except (SourceError, httpx.HTTPError) as e:
             blocked.set()
-            return [], [f"live/{gid}: {getattr(e, 'message', e)}"]
+            return [], [f"{gid}: {getattr(e, 'message', e)}"]
 
     # ponytail: fixed 4 parallel fetches, one HTTP request per game. Games already fetched are
     # kept even if a later one fails. Move to a background job if one request takes too long.
